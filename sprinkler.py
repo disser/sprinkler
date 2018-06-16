@@ -1,5 +1,9 @@
+#!/usr/bin/env python3
+
 import logging
+import logging.handlers
 import re
+import sys
 import time
 from argparse import ArgumentParser
 from collections import OrderedDict
@@ -11,6 +15,7 @@ ZONE_MAP = OrderedDict([
     ("frontyard", automationhat.relay.two),
     ("aux", automationhat.relay.three),
 ])
+
 
 def parse_time(spec):
     regexes = [
@@ -69,21 +74,32 @@ def preamble_animation():
 
 
 def run_zone(zone, seconds):
-    preamble_animation()
     end_time = time.time() + seconds
     relay = ZONE_MAP[zone]
     relay.on()
 
     while time.time() < end_time:
-        relay.light_no.on()
+        light_counter = int(time.time())%4
+        relay.light_no.write(light_counter >> 1)
+        relay.light_nc.write(light_counter & 1)
         time.sleep(0.25)
-        relay.light_nc.on()
-        time.sleep(0.25)
-        relay.light_no.off()
-        time.sleep(0.25)
-        relay.light_nc.off()
-        
+
     turn_everything_off()
+
+
+def config_logging():
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    logging.getLogger().addHandler(console_handler)
+
+    system_handler = logging.handlers.RotatingFileHandler("/var/log/sprinkler/sprinkler.log", maxBytes=100*(2**20),
+                                                          backupCount=10)
+    system_formatter = logging.Formatter('%(asctime)s %(name)s %(levelname)s %(message)s')
+    system_handler.setFormatter(system_formatter)
+    system_handler.setLevel(logging.DEBUG)
+    logging.getLogger().addHandler(system_handler)
+
+    logging.getLogger().setLevel(logging.DEBUG)
 
 
 def main():
@@ -92,14 +108,19 @@ def main():
     parser.add_argument("runtime")
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.DEBUG)
+    config_logging()
 
     run_time = parse_time(args.runtime)
     logging.debug("Parse runtime of %s to %d seconds", args.runtime, run_time)
-    logging.info("Turning on zone %s for %d seconds", args.zone, run_time)
 
     turn_everything_off()
+    logging.info("Turned off all zones")
+    preamble_animation()
+
+    logging.info("Turning on zone %s for %d seconds", args.zone, run_time)
     run_zone(args.zone, run_time)
+    logging.info("Turned off all zones")
+
 
 if __name__ == "__main__":
     exit(main())
